@@ -1,3 +1,4 @@
+#New file to test only deployment of the same image on prod environment
 steps:
 - name: gcr.io/cloud-builders/gke-deploy
   args:
