@@ -1,0 +1,46 @@
+#Build Config to experiment scanning on demand in builds
+steps:
+- name: gcr.io/cloud-builders/mvn
+  args: ['package','-Dmaven.test.skip=true']
+  id: package
+- id: build
+  name: gcr.io/cloud-builders/docker
+  entrypoint: /bin/bash
+  args:
+  - -c
+  - |
+    docker build -t europe-docker.pkg.dev/$PROJECT_ID/cloudbuilds/javasample:latest -f ./Dockerfile --build-arg=JAR_FILE=target/sample-0.0.1-SNAPSHOT.jar . &&
+    docker image inspect europe-docker.pkg.dev/$PROJECT_ID/cloudbuilds/javasample:latest --format \
+    '{{index .RepoTags 0}}@{{.Id}}' > /workspace/image-digest.txt &&
+    cat image-digest.txt
+  waitFor: ['package']
+- id: scan
+  name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  entrypoint: gcloud
+  args:
+  - -c
+  - |
+    gcloud artifacts docker images scan europe-docker.pkg.dev/$PROJECT_ID/cloudbuilds/javasample:latest \
+    --additional-package-types=MAVEN --enable--format='value(response.scan)' > /workspace/scan_id.txt
+  waitFor: ['build']
+- id: severity check
+  name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  entrypoint: gcloud
+  args:
+  - -c
+  - |
+    gcloud artifacts docker images list-vulnerabilities $(cat /workspace/scan_id.txt) \
+    --format='value(vulnerability.effectiveSeverity)' | if grep -Fxq $_SEVERITY; \
+    then echo 'Failed vulnerability check' && exit 1; else exit 0; fi
+  waitFor: ['build','scan']
+- name: gcr.io/cloud-builders/docker
+  args: ['push','europe-docker.pkg.dev/$PROJECT_ID/cloudbuilds/javasample:latest']
+  id: push
+  waitFor: ['build','severity check']
+images: ['europe-docker.pkg.dev/$PROJECT_ID/cloudbuilds/javasample:latest']
+
+
+
+
+
+
